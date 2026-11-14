@@ -29,6 +29,15 @@ final class DebugLogWriter {
         queue.async { [self] in
             let line = formatter.string(from: Date()) + " " + msg + "\n"
             let url = URL(fileURLWithPath: logPath)
+            // 全部 log() 现在都镜像到这里，加 1 MB 上限轮转到 log2.1，
+            // 否则一次采集几万行会把沙盒撑爆。
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let size = (attrs[.size] as? NSNumber)?.uint64Value,
+               size >= 1_048_576 {
+                let rotated = url.appendingPathExtension("1")
+                try? FileManager.default.removeItem(at: rotated)
+                try? FileManager.default.moveItem(at: url, to: rotated)
+            }
             if let handle = FileHandle(forWritingAtPath: url.path) {
                 handle.seekToEndOfFile()
                 if let d = line.data(using: .utf8) {

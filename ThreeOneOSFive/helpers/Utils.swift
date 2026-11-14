@@ -157,7 +157,13 @@ class AppLog: ObservableObject {
         }
     }
 }
-func log(_ msg: String) { AppLog.shared.append("[TRX] \(msg)") }
+/// 进 App 内日志（加密落盘 Documents/Logs/log），同时镜像一份到明文
+/// Documents/log2。后者只有 DebugLogWriter 会写，原来采集流程的 collect: 行
+/// 在 log2 里完全看不到，排查 26.6.1+ 的 worse_query 路径几乎无从下手。
+func log(_ msg: String) {
+    AppLog.shared.append("[TRX] \(msg)")
+    DebugLogWriter.shared.write(msg)
+}
 
 // Retain the pipe for the app's lifetime so stdout/stderr stay redirected.
 private var logCapturePipe: Pipe?
