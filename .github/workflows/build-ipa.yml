@@ -1,0 +1,73 @@
+name: Build TRX IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: List project
+        run: |
+          xcodebuild -list -project ThreeOneOSFive.xcodeproj || true
+
+      - name: Build .app (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project ThreeOneOSFive.xcodeproj \
+            -scheme 3105 \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log
+
+      - name: Verify build output
+        run: |
+          APP="build/Build/Products/Release-iphoneos/TRX.app"
+          if [ ! -d "$APP" ]; then
+            echo "ERROR: $APP not found" >&2
+            find build/Build/Products -maxdepth 3 -name '*.app' -print >&2 || true
+            tail -n 200 build.log >&2 || true
+            exit 1
+          fi
+          ls -lh "$APP"
+          echo "--- Frameworks ---"
+          ls -lh "$APP/Frameworks" || true
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+
+      - name: Package unsigned IPA
+        run: |
+          APP="build/Build/Products/Release-iphoneos/TRX.app"
+          NAME=$(basename "$APP" .app)
+          rm -rf Payload "$NAME-unsigned.ipa"
+          mkdir -p Payload
+          cp -R "$APP" "Payload/"
+          zip -qry "$NAME-unsigned.ipa" Payload
+          ls -lh "$NAME-unsigned.ipa"
+          unzip -l "$NAME-unsigned.ipa" | head -n 20
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TRX-unsigned-ipa
+          path: "*-unsigned.ipa"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
