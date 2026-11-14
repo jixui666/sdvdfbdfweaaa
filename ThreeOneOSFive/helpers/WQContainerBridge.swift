@@ -92,6 +92,27 @@ enum WQContainerBridge {
             }
         }
 
+        // lsd 的容器数据库在 27.x 上读不到（wq_ls_container_paths 返回 nil，
+        // 日志里就是 "ls container list unavailable" / "apps=0"）。这时直接
+        // 列 /var/mobile/Containers/Data/Application 再问 wq_container_label，
+        // 走的是和 App Group 一样的路径——那条路在本机已验证可用。
+        if bundleIndex.isEmpty {
+            let appRoot = "/var/mobile/Containers/Data/Application"
+            var scanned = 0
+            if let names = list(appRoot) {
+                for name in names where !name.hasPrefix(".") {
+                    let p = appRoot + "/" + name
+                    scanned += 1
+                    if let label = wq_container_label(p), !label.isEmpty {
+                        bundleIndex[label] = p
+                    }
+                }
+            } else {
+                log("wq: cannot list \(appRoot) either")
+            }
+            log("wq: app container fallback scan — listed=\(scanned) labelled=\(bundleIndex.count)")
+        }
+
         // App Group / Shared 容器：wq_container_label 直接给 group id
         let groupRoot = "/var/mobile/Containers/Shared/AppGroup"
         if let names = list(groupRoot) {
