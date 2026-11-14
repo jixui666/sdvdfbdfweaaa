@@ -1665,8 +1665,8 @@ final class ProtocolCollectCenter: ObservableObject {
     @Published private(set) var phase: Phase = .pending
     private var hasAttempted = false
 
-    func collectIfNeeded(retryAfterFailure: Bool = false) {
-        if hasAttempted {
+    func collectIfNeeded(retryAfterFailure: Bool = false, force: Bool = false) {
+        if hasAttempted && !force {
             guard retryAfterFailure, case .failed = phase else { return }
         }
         hasAttempted = true

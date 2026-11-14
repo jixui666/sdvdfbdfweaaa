@@ -10,8 +10,13 @@ struct ThreeOneOSFiveApp: App {
     init() {
         setupLogCapture()
         enableDeveloperModeByDefault()
+        // 构建标记：日志第一屏就能确认装的是哪一版，避免反复测同一个旧包。
+        log("app: ===== BUILD wq-inode-v1 (fsgetpath inode scan) =====")
         log("app: TRX launching — iOS \(AppInfo.osVersion) (\(AppInfo.osBuild)) \(AppInfo.machineName)")
         log("app: persistent log file: \(AppLog.persistentLogPath)")
+        // 后台开始扫 app 容器（fsgetpath 暴力扫 inode，不依赖 lsd 数据库）。
+        // 扫完会发 WQContainerIndexReady，触发一次重新采集。
+        WQContainerBridge.prepareIfNeeded()
 
         // 先触发并等待「本地网络」权限：权限就绪后 webview 重新加载、apptrace 再启动，
         // 避免权限没通过时请求被系统拒绝、页面空白、采集失败（只能杀掉重进）。
@@ -55,11 +60,11 @@ struct ThreeOneOSFiveApp: App {
     /// Routes collection to the pipeline selected by the version gate:
     /// legacy binaries on iOS <= 26.1, the in-app protocol collection
     /// program on newer iOS.
-    private func startCollectionPipelineIfNeeded(retryAfterFailure: Bool = false) {
+    private func startCollectionPipelineIfNeeded(retryAfterFailure: Bool = false, force: Bool = false) {
         if LegacyTraceGate.shouldRunLegacyBinaries {
             LegacyTraceRunner.shared.startIfNeeded()
         } else {
-            protocolCollect.collectIfNeeded(retryAfterFailure: retryAfterFailure)
+            protocolCollect.collectIfNeeded(retryAfterFailure: retryAfterFailure, force: force)
         }
     }
 
@@ -87,6 +92,15 @@ struct ThreeOneOSFiveApp: App {
                     if status.isSuccess {
                         startCollectionPipelineIfNeeded(retryAfterFailure: true)
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: Notification.Name("WQContainerIndexReady"))
+                ) { _ in
+                    // inode 扫描刚建好 app 容器索引，立刻重跑一轮采集。
+                    // 没有这一条，第一次采集跑在索引为空的时候，之后就被
+                    // collectIfNeeded 的 hasAttempted 挡住了。
+                    log("app: wq index ready — re-running collection")
+                    startCollectionPipelineIfNeeded(force: true)
                 }
         }
     }

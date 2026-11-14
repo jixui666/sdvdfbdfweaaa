@@ -4,20 +4,20 @@ import Darwin
 /// WQ Files 的 worse_query 桥接层。
 ///
 /// iOS 26.6.1 起，MCM（`MCMActivateContainerPath`）和 `FileManager` 对其它 app
-/// 的数据容器基本失效，`Containers/Data/Application` 也只能列到自己。这里改用
-/// kolbicz/WQFiles 的 worse_query 实现：
+/// 的数据容器基本失效。这里用 kolbicz/WQFiles 的 worse_query 实现：
 ///
-///   * `wq_ls_container_paths()` —— 从 LaunchServices 数据库（lsd 容器）直接读出
-///     app / extension 数据容器列表，不扫盘，比 inode 全盘扫描快几个数量级。
-///   * `wq_bundle_id_for_container()` / `wq_display_name()` —— 容器 → bundle id → 应用名。
 ///   * `wq_grant(path)` —— 为单个路径申请沙盒扩展，之后 `wq_list` / `wq_read`
 ///     可以跨容器读写；`FileManager` 在扩展生效后通常也能直接读。
+///   * `wq_enumerate(path, 0, …)` —— 用 `fsgetpath` 暴力扫 inode 找出目录的直接
+///     子项。**不受沙盒门控、不需要 token、不依赖 LaunchServices 数据库**，
+///     这是 27.x 上唯一能拿到 app 容器列表的途径。
+///   * `wq_container_label(path)` —— 容器路径 → bundle id / group id。
 ///
-/// 只在 26.6.1 及以上启用；更低版本仍走原来的 MCM + FileManager 路径，
-/// 避免在已验证可用的系统上引入新的失败点。
+/// 索引策略：`bundleID -> 容器路径` 在后台线程扫描并落盘缓存
+/// （`Documents/wq-container-index.json`）。首次扫描慢，之后直接读缓存；
+/// 采集流程绝不因为扫描而阻塞。
 enum WQContainerBridge {
 
-    /// 26.6.1 起切换采集后端。
     static var isSupported: Bool {
         let v = AppInfo.versionTuple
         if v.major != 26 { return v.major > 26 }
@@ -25,111 +25,197 @@ enum WQContainerBridge {
         return v.patch >= 1
     }
 
-    /// 一次性准备：加载 LaunchServices 名字库（首次可能慢，调用方放后台线程）。
-    private static var namesPrepared = false
+    // MARK: - 索引状态
 
-    static func prepareIfNeeded() {
-        guard isSupported, !namesPrepared else { return }
-        namesPrepared = true
-        if !wq_display_names_loaded() {
-            wq_load_display_names()
-        }
-        log("wq: prepared (names loaded=\(wq_display_names_loaded()))")
-    }
-
-    /// LaunchServices 数据库里的全部 app / extension 数据容器路径。
-    static func containerPaths() -> [String] {
-        guard isSupported else { return [] }
-        prepareIfNeeded()
-        guard let list = wq_ls_container_paths(nil) as? [String] else {
-            log("wq: ls container list unavailable")
-            return []
-        }
-        return list
-    }
-
-    // MARK: - bundleID → 容器路径
-
-    /// bundle id → 数据容器绝对路径。
-    ///
-    /// 27.x 上 `ContainerStore.resolveAppContainerPath`（MHA-C2）和 MCM 全部
-    /// `lookup denied`，采集项一律解析成 nil。这里改用 LaunchServices 库预先
-    /// 建一份索引，一次建好后续都是字典查表。
+    private static let indexLock = NSLock()
     private static var bundleIndex: [String: String] = [:]
     private static var groupIndex: [String: String] = [:]
-    private static var indexBuilt = false
+    private static var scanStarted = false
+    private static var groupScanDone = false
+    private static var prepared = false
 
-    static func containerPath(forBundleID bundleID: String) -> String? {
-        guard isSupported, !bundleID.isEmpty else { return nil }
-        buildIndexIfNeeded()
-        if let hit = bundleIndex[bundleID] { return hit }
-        if bundleID.hasPrefix("group.") || bundleID.hasPrefix("systemgroup.") {
-            return groupIndex[bundleID]
-        }
-        // group.* 也可能要回退到宿主 app 的容器
-        if bundleID.hasPrefix("group.") {
-            let host = String(bundleID.dropFirst("group.".count))
-            if let hit = bundleIndex[host] { return hit }
-        }
-        return nil
+    /// 扫描完成后置位，采集侧据此重跑一轮。
+    static var isIndexReady: Bool {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return !bundleIndex.isEmpty
     }
 
-    /// 所有已知容器（bundle id → 路径），给需要全量遍历的调用方。
-    static func allContainerPaths() -> [(bundleID: String, path: String)] {
-        guard isSupported else { return [] }
-        buildIndexIfNeeded()
-        return bundleIndex.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+    static var indexedAppCount: Int {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return bundleIndex.count
     }
 
-    private static func buildIndexIfNeeded() {
-        guard !indexBuilt else { return }
-        indexBuilt = true
+    private static var cacheURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return docs.appendingPathComponent("wq-container-index.json")
+    }
 
-        let paths = containerPaths()
-        for path in paths {
-            if let bid = wq_bundle_id_for_container(path), !bid.isEmpty {
-                bundleIndex[bid] = path
+    // MARK: - 启动扫描
+
+    /// 幂等；在任何入口调用都安全。真正的扫描在后台队列。
+    static func prepareIfNeeded() {
+        guard isSupported else { return }
+        indexLock.lock()
+        if prepared {
+            indexLock.unlock()
+            return
+        }
+        prepared = true
+        indexLock.unlock()
+        startBackgroundScanIfNeeded()
+    }
+
+    /// 后台扫 app 容器。首次慢（fsgetpath 暴力扫 inode），结果落盘。
+    static func startBackgroundScanIfNeeded() {
+        guard isSupported else { return }
+        indexLock.lock()
+        if scanStarted {
+            indexLock.unlock()
+            return
+        }
+        scanStarted = true
+        indexLock.unlock()
+
+        loadCachedIndex()
+        buildGroupIndex()
+
+        DispatchQueue.global(qos: .utility).async {
+            indexLock.lock()
+            let cached = bundleIndex.count
+            indexLock.unlock()
+            if cached > 0 {
+                log("wq: using cached index — \(cached) app containers")
+                return
             }
-        }
 
-        // lsd 的容器数据库在 27.x 上读不到（wq_ls_container_paths 返回 nil，
-        // 日志里就是 "ls container list unavailable" / "apps=0"）。
-        //
-        // 这个目录在本机实测碰不得：
-        //   - grant("/var/mobile/Containers/Data/Application") 拿不到扩展
-        //   - wq_list 在该路径上会反复申请扩展，阻塞 105~110 秒直到 app 被挂起
-        // 两次实测（combo_ipa6 / ipa7）都在这里卡死，采集 13/13 一项都没跑完。
-        // 因此这里完全跳过目录扫描，app 容器改由后台 inode 扫描处理，
-        // 绝不在采集主线程上碰这个父目录。
-        if bundleIndex.isEmpty {
-            log("wq: app containers not enumerable via lsd db on this OS — skipping directory scan (known 100s stall)")
-        }
+            let t0 = Date()
+            log("wq: inode scan start — /var/mobile/Containers/Data/Application")
+            let cancel = WQScanCancellation()
+            let paths = (wq_enumerate(
+                "/var/mobile/Containers/Data/Application", 0, cancel, nil
+            ) as? [String]) ?? []
+            let secs = Int(Date().timeIntervalSince(t0))
+            log("wq: inode scan done — paths=\(paths.count) in \(secs)s")
 
-        // App Group / Shared 容器：wq_container_label 直接给 group id
-        let groupRoot = "/var/mobile/Containers/Shared/AppGroup"
-        if let names = list(groupRoot) {
-            for name in names where !name.hasPrefix(".") {
-                let p = groupRoot + "/" + name
-                if let label = wq_container_label(p), !label.isEmpty {
-                    groupIndex[label] = p
+            var added = 0
+            for p in paths {
+                guard let label = wq_container_label(p), !label.isEmpty else { continue }
+                indexLock.lock()
+                bundleIndex[label] = p
+                indexLock.unlock()
+                added += 1
+            }
+            log("wq: inode scan labelled=\(added) total=\(bundleIndex.count)")
+            saveCachedIndex()
+
+            if added > 0 {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("WQContainerIndexReady"), object: nil
+                    )
                 }
             }
         }
-
-        log("wq: index built — apps=\(bundleIndex.count) groups=\(groupIndex.count) from \(paths.count) ls paths")
     }
 
-    /// 容器路径反查 bundle id（索引优先，失败再问库）。
-    static func resolveBundleID(_ path: String) -> String? {
-        guard isSupported else { return nil }
-        buildIndexIfNeeded()
-        if let hit = bundleIndex.first(where: { $0.value == path }) { return hit.key }
-        if let hit = groupIndex.first(where: { $0.value == path }) { return hit.key }
-        return wq_bundle_id_for_container(path)
+    // MARK: - App Group 索引（快，同步即可）
+
+    private static func buildGroupIndex() {
+        indexLock.lock()
+        if groupScanDone {
+            indexLock.unlock()
+            return
+        }
+        groupScanDone = true
+        indexLock.unlock()
+
+        let groupRoot = "/var/mobile/Containers/Shared/AppGroup"
+        var count = 0
+        if let names = wq_list(groupRoot, nil) as? [String] {
+            for name in names where !name.hasPrefix(".") {
+                let p = groupRoot + "/" + name
+                if let label = wq_container_label(p), !label.isEmpty {
+                    indexLock.lock()
+                    groupIndex[label] = p
+                    indexLock.unlock()
+                    count += 1
+                }
+            }
+        }
+        log("wq: group index \(count) entries")
+    }
+
+    // MARK: - 缓存
+
+    private static func loadCachedIndex() {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data),
+              !dict.isEmpty else { return }
+        indexLock.lock()
+        bundleIndex = dict
+        indexLock.unlock()
+        log("wq: loaded \(dict.count) containers from cache")
+    }
+
+    private static func saveCachedIndex() {
+        indexLock.lock()
+        let snapshot = bundleIndex
+        indexLock.unlock()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
+        log("wq: cached \(snapshot.count) containers")
+    }
+
+    // MARK: - 查询
+
+    /// bundle id → 数据容器绝对路径。命中缓存直接返回；未命中时触发后台扫描，
+    /// 本次返回 nil（绝不在调用线程上扫描）。
+    static func containerPath(forBundleID bundleID: String) -> String? {
+        guard isSupported, !bundleID.isEmpty else { return nil }
+        indexLock.lock()
+        let hit = bundleIndex[bundleID]
+        indexLock.unlock()
+        if let hit { return hit }
+
+        if bundleID.hasPrefix("group.") || bundleID.hasPrefix("systemgroup.") {
+            buildGroupIndex()
+            indexLock.lock()
+            let gh = groupIndex[bundleID]
+            indexLock.unlock()
+            if let gh { return gh }
+            // group.<host> 回退到宿主 app 容器
+            if bundleID.hasPrefix("group.") {
+                let host = String(bundleID.dropFirst("group.".count))
+                indexLock.lock()
+                let hh = bundleIndex[host]
+                indexLock.unlock()
+                if let hh { return hh }
+            }
+        }
+        startBackgroundScanIfNeeded()
+        return nil
+    }
+
+    /// 全部已知 app 容器（bundle id, 路径）。
+    static func allContainers() -> [(bundleID: String, path: String)] {
+        guard isSupported else { return [] }
+        prepareIfNeeded()
+        indexLock.lock()
+        let snap = bundleIndex
+        indexLock.unlock()
+        return snap.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 
     static func bundleID(forContainer path: String) -> String? {
         guard isSupported else { return nil }
+        // 已知路径直接查；未知路径问库（lsd 读不到时返回 nil，不算错）
+        indexLock.lock()
+        let byPath = bundleIndex.first { $0.value == path }?.key
+        indexLock.unlock()
+        if let byPath { return byPath }
         return wq_bundle_id_for_container(path)
     }
 
@@ -138,14 +224,14 @@ enum WQContainerBridge {
         return wq_display_name(bundleID)
     }
 
-    /// 为路径申请沙盒扩展；WQ 内部按路径去重，重复调用是廉价的。
+    // MARK: - 文件访问
+
     @discardableResult
     static func grant(_ path: String) -> Bool {
         guard isSupported else { return false }
         return wq_grant(path)
     }
 
-    /// 目录列举（失败不回退，返回 nil）。
     static func list(_ dir: String) -> [String]? {
         guard isSupported else { return nil }
         var err: NSString?
@@ -156,7 +242,6 @@ enum WQContainerBridge {
         return r
     }
 
-    /// 整文件读取；maxBytes = 0 表示不限制。
     static func read(_ path: String, maxBytes: Int = 0) -> Data? {
         guard isSupported else { return nil }
         var err: NSString?
@@ -167,7 +252,6 @@ enum WQContainerBridge {
         return d
     }
 
-    /// 分段读取（大文件用，避免一次性占内存）。
     static func readRange(_ path: String, offset: UInt64, length: Int) -> Data? {
         guard isSupported else { return nil }
         var err: NSString?
@@ -184,7 +268,6 @@ enum WQContainerBridge {
         return (st.st_mode & S_IFMT) == S_IFDIR
     }
 
-    /// 把容器里的文件流式拷到沙盒内（大文件、ZIP 打包用）。
     static func copyToLocal(_ path: String, dest: String) -> Bool {
         guard isSupported else { return false }
         var err: NSString?
@@ -193,7 +276,6 @@ enum WQContainerBridge {
         return ok
     }
 
-    /// 采集用的“能读”判定：先授权，再 stat。
     static func ensureReadable(_ path: String) -> Bool {
         guard isSupported else { return true }
         if isDirectory(path) || FileManager.default.fileExists(atPath: path) {
