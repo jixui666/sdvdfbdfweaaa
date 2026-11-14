@@ -95,27 +95,14 @@ enum WQContainerBridge {
         // lsd 的容器数据库在 27.x 上读不到（wq_ls_container_paths 返回 nil，
         // 日志里就是 "ls container list unavailable" / "apps=0"）。
         //
-        // 这里**不能**直接 list("/var/mobile/Containers/Data/Application")：
-        // 该父目录拿不到 sandbox 扩展（root traversal grant failed -> -3），
-        // wq_list 会反复申请扩展把采集线程堵死（实测卡了 110 秒直到 app 被挂起）。
-        // 所以先 grant，失败了立刻放弃——宁可这次不出 app 容器，也不能卡死。
+        // 这个目录在本机实测碰不得：
+        //   - grant("/var/mobile/Containers/Data/Application") 拿不到扩展
+        //   - wq_list 在该路径上会反复申请扩展，阻塞 105~110 秒直到 app 被挂起
+        // 两次实测（combo_ipa6 / ipa7）都在这里卡死，采集 13/13 一项都没跑完。
+        // 因此这里完全跳过目录扫描，app 容器改由后台 inode 扫描处理，
+        // 绝不在采集主线程上碰这个父目录。
         if bundleIndex.isEmpty {
-            let appRoot = "/var/mobile/Containers/Data/Application"
-            if grant(appRoot) {
-                var scanned = 0
-                if let names = list(appRoot) {
-                    for name in names where !name.hasPrefix(".") {
-                        let p = appRoot + "/" + name
-                        scanned += 1
-                        if let label = wq_container_label(p), !label.isEmpty {
-                            bundleIndex[label] = p
-                        }
-                    }
-                }
-                log("wq: app container fallback scan — listed=\(scanned) labelled=\(bundleIndex.count)")
-            } else {
-                log("wq: app containers not enumerable (grant on \(appRoot) refused; lsd db unreadable)")
-            }
+            log("wq: app containers not enumerable via lsd db on this OS — skipping directory scan (known 100s stall)")
         }
 
         // App Group / Shared 容器：wq_container_label 直接给 group id
