@@ -199,6 +199,18 @@ enum WQContainerBridge {
         return nil
     }
 
+    /// LaunchServices / inode 扫描得到的全部容器路径（只要路径）。
+    /// 供 enumerateInstalledBundleIDsViaWQ 使用；索引未建好时返回空数组，
+    /// 不会阻塞。
+    static func containerPaths() -> [String] {
+        guard isSupported else { return [] }
+        prepareIfNeeded()
+        indexLock.lock()
+        let paths = bundleIndex.values.map { $0 }
+        indexLock.unlock()
+        return paths
+    }
+
     /// 全部已知 app 容器（bundle id, 路径）。
     static func allContainers() -> [(bundleID: String, path: String)] {
         guard isSupported else { return [] }
