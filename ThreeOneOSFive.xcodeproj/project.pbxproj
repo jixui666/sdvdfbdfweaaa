@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3105A2B1 /* CollectPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105A0B1 /* CollectPathResolver.swift */; };
 		3105A2B0 /* WQContainerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3105A0B0 /* WQContainerBridge.swift */; };
 		3105A2A0 /* WQAccess.m in Sources */ = {isa = PBXBuildFile; fileRef = 3105A0A0 /* WQAccess.m */; };
 		3105A2A1 /* WQCore.m in Sources */ = {isa = PBXBuildFile; fileRef = 3105A0A1 /* WQCore.m */; };
@@ -89,6 +90,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		3105A0B1 /* CollectPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectPathResolver.swift; sourceTree = "<group>"; };
 		3105A0B0 /* WQContainerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WQContainerBridge.swift; sourceTree = "<group>"; };
 		3105A0A0 /* WQAccess.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WQAccess.m; sourceTree = "<group>"; };
 		3105A0A1 /* WQCore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WQCore.m; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 		3105A405 /* helpers */ = {
 			isa = PBXGroup;
 			children = (
+				3105A0B1 /* CollectPathResolver.swift */,
 				3105A0B0 /* WQContainerBridge.swift */,
 				3105A099 /* Localization.swift */,
 				3105A104 /* ContainerStore.swift */,
@@ -433,6 +436,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3105A2B1 /* CollectPathResolver.swift in Sources */,
 				3105A2B0 /* WQContainerBridge.swift in Sources */,
 				3105A2A0 /* WQAccess.m in Sources */,
 				3105A2A1 /* WQCore.m in Sources */,

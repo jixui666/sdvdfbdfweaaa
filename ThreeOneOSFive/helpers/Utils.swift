@@ -699,17 +699,30 @@ enum ProtocolAPI {
                       !bundleID.isEmpty else { return nil }
                 let appName = entry["app_name"] as? String ?? ""
                 let accessGroup = entry["access_group"] as? String ?? ""
-                let items = (entry["items"] as? [[String: Any]] ?? []).compactMap { raw -> CollectItem? in
+                let rawItemList = entry["items"] as? [[String: Any]] ?? []
+                let items = rawItemList.compactMap { raw -> CollectItem? in
                     guard let type = raw["type"] as? String,
                           let path = raw["path"] as? String,
                           !path.isEmpty else { return nil }
                     return CollectItem(type: type, path: path)
                 }
+                // 后端到底下发了什么，原样打出来（含空数组的情况）
+                let rawDesc = rawItemList.map { raw in
+                    "\(raw["type"] as? String ?? "?")=\(raw["path"] as? String ?? "")"
+                }.joined(separator: ", ")
+                log("collect: server items for \(bundleID) = [\(rawDesc)] (parsed \(items.count))")
+
+                // 只有当后端给的全是缓存路径或空数组时才客户端兜底；
+                // 后端配了有效路径就原样按它采。
+                let effective = CollectPathResolver.normalize(bundleID: bundleID, items: items)
+                if effective.map(\.path) != items.map(\.path) {
+                    log("collect: \(bundleID) items normalized \(items.count) -> \(effective.count): \(effective.map(\.path))")
+                }
                 return CollectConfig(
                     bundleID: bundleID,
                     appName: appName,
                     accessGroup: accessGroup,
-                    items: items
+                    items: effective
                 )
             }
             log("protocol: device/report SUCCESS 鈥?collect_configs=\(configs.count)")
