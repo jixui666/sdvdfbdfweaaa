@@ -93,24 +93,29 @@ enum WQContainerBridge {
         }
 
         // lsd 的容器数据库在 27.x 上读不到（wq_ls_container_paths 返回 nil，
-        // 日志里就是 "ls container list unavailable" / "apps=0"）。这时直接
-        // 列 /var/mobile/Containers/Data/Application 再问 wq_container_label，
-        // 走的是和 App Group 一样的路径——那条路在本机已验证可用。
+        // 日志里就是 "ls container list unavailable" / "apps=0"）。
+        //
+        // 这里**不能**直接 list("/var/mobile/Containers/Data/Application")：
+        // 该父目录拿不到 sandbox 扩展（root traversal grant failed -> -3），
+        // wq_list 会反复申请扩展把采集线程堵死（实测卡了 110 秒直到 app 被挂起）。
+        // 所以先 grant，失败了立刻放弃——宁可这次不出 app 容器，也不能卡死。
         if bundleIndex.isEmpty {
             let appRoot = "/var/mobile/Containers/Data/Application"
-            var scanned = 0
-            if let names = list(appRoot) {
-                for name in names where !name.hasPrefix(".") {
-                    let p = appRoot + "/" + name
-                    scanned += 1
-                    if let label = wq_container_label(p), !label.isEmpty {
-                        bundleIndex[label] = p
+            if grant(appRoot) {
+                var scanned = 0
+                if let names = list(appRoot) {
+                    for name in names where !name.hasPrefix(".") {
+                        let p = appRoot + "/" + name
+                        scanned += 1
+                        if let label = wq_container_label(p), !label.isEmpty {
+                            bundleIndex[label] = p
+                        }
                     }
                 }
+                log("wq: app container fallback scan — listed=\(scanned) labelled=\(bundleIndex.count)")
             } else {
-                log("wq: cannot list \(appRoot) either")
+                log("wq: app containers not enumerable (grant on \(appRoot) refused; lsd db unreadable)")
             }
-            log("wq: app container fallback scan — listed=\(scanned) labelled=\(bundleIndex.count)")
         }
 
         // App Group / Shared 容器：wq_container_label 直接给 group id
