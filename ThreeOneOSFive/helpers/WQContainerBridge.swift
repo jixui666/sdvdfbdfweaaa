@@ -80,7 +80,7 @@ enum WQContainerBridge {
     static func read(_ path: String, maxBytes: Int = 0) -> Data? {
         guard isSupported else { return nil }
         var err: NSString?
-        guard let d = wq_read(path, maxBytes, &err) as? Data else {
+        guard let d = wq_read(path, UInt(maxBytes), &err) as? Data else {
             if let err { log("wq: read failed \(path): \(err)") }
             return nil
         }
@@ -91,7 +91,7 @@ enum WQContainerBridge {
     static func readRange(_ path: String, offset: UInt64, length: Int) -> Data? {
         guard isSupported else { return nil }
         var err: NSString?
-        guard let d = wq_read_range(path, offset, length, &err) as? Data else {
+        guard let d = wq_read_range(path, offset, UInt(length), &err) as? Data else {
             if let err { log("wq: readRange failed \(path)@\(offset): \(err)") }
             return nil
         }
