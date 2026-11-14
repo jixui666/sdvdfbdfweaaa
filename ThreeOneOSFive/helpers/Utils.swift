@@ -906,6 +906,40 @@ enum ProtocolLogReporter {
 enum ProtocolCollectService {
     static let maximumLocalZipCount = 10
 
+    // MARK: - per-file 日志节流
+    //
+    // 逐文件 log 会在 1 分钟内把 1MB x 3 的日志轮转槽全冲满，把
+    // "server items for …" / "cycle done" 这些排查关键行挤掉。
+    // 这里改成每 500 个文件汇总一行，结束时补一行总数。
+    private static var pendingFileCount = 0
+    private static var pendingByteCount = 0
+    private static let copyLogLock = NSLock()
+
+    static func notePerFileCopy(bytes: Int) {
+        copyLogLock.lock()
+        pendingFileCount += 1
+        pendingByteCount += bytes
+        let n = pendingFileCount
+        let b = pendingByteCount
+        let flush = (n % 500) == 0
+        copyLogLock.unlock()
+        if flush {
+            log("collect: copied \(n) files, \(b / 1024)KB so far")
+        }
+    }
+
+    static func flushPerFileCopyLog() {
+        copyLogLock.lock()
+        let n = pendingFileCount
+        let b = pendingByteCount
+        pendingFileCount = 0
+        pendingByteCount = 0
+        copyLogLock.unlock()
+        if n > 0 {
+            log("collect: copied \(n) files, \(b / 1024)KB total")
+        }
+    }
+
     /// 鐩綍鏁翠綋澶嶅埗澶辫触鏃剁殑鍏滃簳锛氶€愭枃浠跺鍒讹紙Data 璇?+ 鍐欙級锛
     /// 鍗曚釜鏂囦欢璇讳笉浜嗗氨璺宠繃骞惰鏃ュ織锛岃兘鎷垮灏戞嬁澶氬皯銆
     @discardableResult
@@ -939,7 +973,9 @@ enum ProtocolCollectService {
                 )
                 let data = try Data(contentsOf: sourceURL, options: [.uncached])
                 try data.write(to: target, options: .atomic)
-                log("collect: per-file copied \(sourceURL.lastPathComponent) \(data.count)B")
+                // 逐文件记日志会在 1 分钟内把 1MB x 3 的轮转槽全部冲满，
+                // 把 server items / cycle done 这些关键行挤掉。改成节流。
+                ProtocolCollectService.notePerFileCopy(bytes: data.count)
                 return 1
             } catch {
                 // 26.6.1+ 鍏滃簳锛欶ileManager 琚矙鐩掓嫆缁濇椂鐢?worse_query 璇诲師濮嬪瓧鑺
@@ -947,7 +983,7 @@ enum ProtocolCollectService {
                    let data = WQContainerBridge.read(sourceURL.path) {
                     do {
                         try data.write(to: target, options: .atomic)
-                        log("collect(wq): per-file copied \(sourceURL.lastPathComponent) \(data.count)B")
+                        ProtocolCollectService.notePerFileCopy(bytes: data.count)
                         return 1
                     } catch {
                         log("collect(wq): write failed \(target.lastPathComponent)")
@@ -1190,6 +1226,7 @@ enum ProtocolCollectService {
             byteCount: byteCount,
             completedAt: Date()
         )
+        flushPerFileCopyLog()
         log("collect: done total=\(configs.count) zips=\(zipCount) uploaded=\(uploadedCount)")
         await MainActor.run {
             ProtocolStatusLog.shared.append("閲囬泦瀹屾垚 鈥?鎬诲叡 \(configs.count) 涓紝宸插畬鎴?\(zipCount) 涓紙涓婁紶 \(uploadedCount) 涓級")
