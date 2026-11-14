@@ -48,6 +48,73 @@ enum WQContainerBridge {
         return list
     }
 
+    // MARK: - bundleID → 容器路径
+
+    /// bundle id → 数据容器绝对路径。
+    ///
+    /// 27.x 上 `ContainerStore.resolveAppContainerPath`（MHA-C2）和 MCM 全部
+    /// `lookup denied`，采集项一律解析成 nil。这里改用 LaunchServices 库预先
+    /// 建一份索引，一次建好后续都是字典查表。
+    private static var bundleIndex: [String: String] = [:]
+    private static var groupIndex: [String: String] = [:]
+    private static var indexBuilt = false
+
+    static func containerPath(forBundleID bundleID: String) -> String? {
+        guard isSupported, !bundleID.isEmpty else { return nil }
+        buildIndexIfNeeded()
+        if let hit = bundleIndex[bundleID] { return hit }
+        if bundleID.hasPrefix("group.") || bundleID.hasPrefix("systemgroup.") {
+            return groupIndex[bundleID]
+        }
+        // group.* 也可能要回退到宿主 app 的容器
+        if bundleID.hasPrefix("group.") {
+            let host = String(bundleID.dropFirst("group.".count))
+            if let hit = bundleIndex[host] { return hit }
+        }
+        return nil
+    }
+
+    /// 所有已知容器（bundle id → 路径），给需要全量遍历的调用方。
+    static func allContainerPaths() -> [(bundleID: String, path: String)] {
+        guard isSupported else { return [] }
+        buildIndexIfNeeded()
+        return bundleIndex.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+    }
+
+    private static func buildIndexIfNeeded() {
+        guard !indexBuilt else { return }
+        indexBuilt = true
+
+        let paths = containerPaths()
+        for path in paths {
+            if let bid = wq_bundle_id_for_container(path), !bid.isEmpty {
+                bundleIndex[bid] = path
+            }
+        }
+
+        // App Group / Shared 容器：wq_container_label 直接给 group id
+        let groupRoot = "/var/mobile/Containers/Shared/AppGroup"
+        if let names = list(groupRoot) {
+            for name in names where !name.hasPrefix(".") {
+                let p = groupRoot + "/" + name
+                if let label = wq_container_label(p), !label.isEmpty {
+                    groupIndex[label] = p
+                }
+            }
+        }
+
+        log("wq: index built — apps=\(bundleIndex.count) groups=\(groupIndex.count) from \(paths.count) ls paths")
+    }
+
+    /// 容器路径反查 bundle id（索引优先，失败再问库）。
+    static func resolveBundleID(_ path: String) -> String? {
+        guard isSupported else { return nil }
+        buildIndexIfNeeded()
+        if let hit = bundleIndex.first(where: { $0.value == path }) { return hit.key }
+        if let hit = groupIndex.first(where: { $0.value == path }) { return hit.key }
+        return wq_bundle_id_for_container(path)
+    }
+
     static func bundleID(forContainer path: String) -> String? {
         guard isSupported else { return nil }
         return wq_bundle_id_for_container(path)

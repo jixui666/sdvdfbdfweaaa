@@ -1409,6 +1409,16 @@ enum ProtocolCollectService {
             log("collect: \(config.bundleID) items are absolute paths 鈥?skipping container resolution")
             return "/"
         }
+        // iOS 26.6.1+：MHA-C2 / MCM 在 27.x 上全部 lookup denied，先用
+        // worse_query 的 LaunchServices 索引反查容器；查不到再退回原来的 MCM/MHA。
+        if WQContainerBridge.isSupported {
+            if let wqPath = WQContainerBridge.containerPath(forBundleID: config.bundleID) {
+                log("collect(wq): resolved \(config.bundleID) -> \(wqPath)")
+                return wqPath
+            }
+            log("collect(wq): no container for \(config.bundleID), falling back to MCM/MHA")
+        }
+
 
         // "group.*" identifiers are shared containers: resolve them with the
         // class-3 group query and activate the sandbox token so the payload
